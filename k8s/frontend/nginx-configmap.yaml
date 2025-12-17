@@ -1,0 +1,283 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: alphacar
+data:
+  nginx.conf: |
+    events {
+        worker_connections 1024;
+    }
+
+    http {
+        include       mime.types;
+        default_type  application/octet-stream;
+        
+        access_log /dev/stdout;
+        error_log /dev/stderr;
+
+        upstream frontend_upstream {
+            server frontend:8000;
+        }
+
+        upstream main_backend {
+            server main-backend:3002;
+        }
+
+        upstream quote_backend {
+            server quote-backend:3003;
+        }
+
+        upstream search_backend {
+            server search-backend:3007;
+        }
+
+        upstream mypage_backend {
+            server mypage-backend:3006;
+        }
+
+        upstream community_backend {
+            server community-backend:3005;
+        }
+
+        upstream drive_backend {
+            server drive-backend:3008;
+        }
+
+        upstream aichat_backend {
+            server aichat-backend:4000;
+        }
+
+        # 1. HTTP -> HTTPS 리다이렉트
+        server {
+            listen 80;
+            server_name _;
+            return 301 https://$host$request_uri;
+        }
+
+        # 2. HTTPS (443) - 메인
+        server {
+            listen 443 ssl;
+            server_name _;
+
+            ssl_certificate /etc/nginx/ssl/nginx.crt;
+            ssl_certificate_key /etc/nginx/ssl/nginx.key;
+            ssl_protocols TLSv1.2 TLSv1.3;
+            ssl_ciphers HIGH:!aNULL:!MD5;
+
+            location / {
+                proxy_pass http://frontend_upstream;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+            }
+
+            # API 라우팅 규칙 (haproxy.cfg 기반)
+            # AI Chat (/api/chat/(.*) -> /chat/\1)
+            location ~ ^/api/chat(.*)$ {
+                proxy_pass http://aichat_backend/chat$1;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+            }
+
+            # Main Backend (더 구체적인 경로를 먼저)
+            location ~ ^/api/vehicles/detail {
+                proxy_pass http://main_backend;
+                rewrite ^/api/(.*) /$1 break;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+            }
+
+            location ~ ^/api/(main|history|recent-views|sales|brands|favorites|log-view|cars|review-analysis) {
+                proxy_pass http://main_backend;
+                rewrite ^/api/(.*) /$1 break;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+            }
+
+            # Quote Backend (prefix 유지 - haproxy.cfg에서 prefix 제거 안함)
+            location ~ ^/api/(vehicles|estimate|quote) {
+                proxy_pass http://quote_backend;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+            }
+
+            # Drive Backend (News)
+            location ~ ^/api/news {
+                proxy_pass http://drive_backend;
+                rewrite ^/api/(.*) /$1 break;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+            }
+
+            # Community Backend
+            location ~ ^/api/community {
+                proxy_pass http://community_backend;
+                rewrite ^/api/(.*) /$1 break;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+            }
+
+            # Mypage Backend
+            location ~ ^/api/mypage {
+                proxy_pass http://mypage_backend;
+                rewrite ^/api/(.*) /$1 break;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+            }
+
+            # Search Backend
+            location ~ ^/api/search {
+                proxy_pass http://search_backend;
+                rewrite ^/api/(.*) /$1 break;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+            }
+
+            # Auth 경로는 Mypage Backend로
+            location /auth/ {
+                proxy_pass http://mypage_backend;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+            }
+
+            # 기본 API는 Main Backend로
+            location /api/ {
+                proxy_pass http://main_backend;
+                rewrite ^/api/(.*) /$1 break;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+            }
+        }
+
+        # 3. HTTPS (8000) - 로그인 콜백용
+        server {
+            listen 8000 ssl;
+            server_name _;
+
+            ssl_certificate /etc/nginx/ssl/nginx.crt;
+            ssl_certificate_key /etc/nginx/ssl/nginx.key;
+            
+            ssl_protocols TLSv1.2 TLSv1.3;
+            ssl_ciphers HIGH:!aNULL:!MD5;
+
+            location / {
+                proxy_pass http://frontend_upstream;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+            }
+
+            # Auth 경로는 Mypage Backend로
+            location /auth/ {
+                proxy_pass http://mypage_backend;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+            }
+            
+            # AI Chat (/api/chat/(.*) -> /chat/\1)
+            location ~ ^/api/chat(.*)$ {
+                proxy_pass http://aichat_backend/chat$1;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+            }
+
+            location ~ ^/api/vehicles/detail {
+                proxy_pass http://main_backend;
+                rewrite ^/api/(.*) /$1 break;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+            }
+
+            location ~ ^/api/(main|history|recent-views|sales|brands|favorites|log-view|cars|review-analysis) {
+                proxy_pass http://main_backend;
+                rewrite ^/api/(.*) /$1 break;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+            }
+
+            location ~ ^/api/(vehicles|estimate|quote) {
+                proxy_pass http://quote_backend;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+            }
+
+            location ~ ^/api/news {
+                proxy_pass http://drive_backend;
+                rewrite ^/api/(.*) /$1 break;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+            }
+
+            location ~ ^/api/community {
+                proxy_pass http://community_backend;
+                rewrite ^/api/(.*) /$1 break;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+            }
+
+            location ~ ^/api/mypage {
+                proxy_pass http://mypage_backend;
+                rewrite ^/api/(.*) /$1 break;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+            }
+
+            location ~ ^/api/search {
+                proxy_pass http://search_backend;
+                rewrite ^/api/(.*) /$1 break;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+            }
+
+            location /api/ {
+                proxy_pass http://main_backend;
+                rewrite ^/api/(.*) /$1 break;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+            }
+        }
+    }
+

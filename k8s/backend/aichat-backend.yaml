@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aichat-backend
+  namespace: alphacar
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aichat-backend
+  template:
+    metadata:
+      labels:
+        app: aichat-backend
+    spec:
+      imagePullSecrets:
+      - name: harbor-registry-secret
+      containers:
+      - name: aichat-backend
+        image: 192.168.0.169/alphacar-project/alphacar-aichat:1.0.0
+        ports:
+        - containerPort: 4000
+          name: http
+        env:
+        - name: PORT
+          value: "4000"
+        - name: SERVICE_NAME
+          value: "aichat-backend"
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-env
+              key: OTEL_EXPORTER_OTLP_ENDPOINT
+        - name: OTEL_LOG_LEVEL
+          value: "debug"
+        - name: OTEL_DIAG_LEVEL
+          value: "debug"
+        - name: DATABASE_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-env
+              key: MONGO_HOST
+        - name: DATABASE_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-env
+              key: MONGO_PORT
+        - name: DATABASE_USER
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-aichat-secret
+              key: username
+        - name: DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-aichat-secret
+              key: password
+        - name: DATABASE_NAME
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-aichat-secret
+              key: database
+        - name: AWS_REGION
+          value: "us-east-1"
+        - name: AWS_ACCESS_KEY_ID
+          value: ""
+        - name: AWS_SECRET_ACCESS_KEY
+          value: ""
+        - name: BEDROCK_GUARDRAIL_ID
+          value: ""
+        - name: BEDROCK_GUARDRAIL_VERSION
+          value: ""
+        - name: BEDROCK_EMBEDDING_MODEL_ID
+          value: ""
+        - name: BEDROCK_MODEL_ID
+          value: ""
+        - name: BEDROCK_LLM_MODEL_ID
+          value: ""
+        volumeMounts:
+        - name: vector-store
+          mountPath: /app/vector_store
+        # vector_store가 없어도 시작되도록 처리
+        command: ["/bin/sh"]
+        args: ["-c", "mkdir -p /app/vector_store && node /app/dist/src/main.js"]
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "300m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+      volumes:
+      - name: vector-store
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aichat-backend
+  namespace: alphacar
+spec:
+  selector:
+    app: aichat-backend
+  ports:
+  - port: 4000
+    targetPort: 4000
+    protocol: TCP
+  type: ClusterIP
+

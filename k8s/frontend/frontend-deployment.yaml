@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: alphacar
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      imagePullSecrets:
+      - name: harbor-registry-secret
+      containers:
+      - name: frontend
+        image: 192.168.0.169/alphacar-project/alphacar-frontend:1.0.0.77
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: API_URL
+          value: "https://192.168.56.200/api"
+        - name: PORT
+          value: "8000"
+        - name: NEXT_PUBLIC_BASE_URL
+          value: "https://192.168.56.200"
+        - name: NEXT_PUBLIC_DOMAIN
+          value: "https://192.168.56.200"
+        - name: NODE_EXTRA_CA_CERTS
+          value: "/etc/ssl/certs/selfsigned.crt"
+        volumeMounts:
+        - name: ssl-cert
+          mountPath: /etc/ssl/certs/selfsigned.crt
+          subPath: selfsigned.crt
+          readOnly: true
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "300m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+      volumes:
+      - name: ssl-cert
+        secret:
+          secretName: ssl-cert
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: alphacar
+spec:
+  selector:
+    app: frontend
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+  type: ClusterIP
+
+
+

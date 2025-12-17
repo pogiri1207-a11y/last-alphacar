@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alphacar-env
+  namespace: alphacar
+data:
+  # MongoDB
+  MONGO_HOST: "mongodb"
+  MONGO_PORT: "27017"
+  MONGO_USER: "admin"
+  MONGO_PASS: "123"
+  MONGO_DB_NAME: "triple_db"
+  MONGO_USER_AICHAT: "proj"
+  MONGO_PASS_AICHAT: "1234"
+  
+  # Redis
+  REDIS_HOST: "192.168.0.175"
+  REDIS_PORT: "6379"
+  
+  # MariaDB
+  MARIADB_HOST: "211.46.52.151"
+  MARIADB_PORT: "15432"
+  MARIADB_USER: "team1"
+  MARIADB_PASS: "Gkrtod1@"
+  MARIADB_DB_NAME: "team1"
+  MARIADB_TYPE: "mariadb"
+  
+  # Observability
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://192.168.0.175:4317"
+  
+  # Frontend
+  FRONTEND_VERSION: "1.0.0"
+  BACKEND_VERSION: "1.0.0"
+  
+  # Domain
+  NIP_DOMAIN: "192.168.56.200"
+  
+  # Traefik Dashboard
+  TRAEFIK_DASHBOARD_PORT: "8080"
+

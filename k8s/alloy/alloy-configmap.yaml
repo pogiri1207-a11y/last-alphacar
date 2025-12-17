@@ -1,0 +1,101 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alloy-config
+  namespace: alphacar
+data:
+  config.alloy: |
+    // Alloy 설정 파일 - Kubernetes 구조용
+    // 모니터링 서버: 192.168.0.175
+
+    // 1. Prometheus Remote Write
+    prometheus.remote_write "prometheus" {
+      endpoint {
+        url = "http://192.168.0.175:9090/api/v1/write"
+      }
+    }
+
+    // 2. Loki Write
+    loki.write "loki" {
+      endpoint {
+        url = "http://192.168.0.175:3100/loki/api/v1/push"
+      }
+    }
+
+    // 3. Tempo (Trace) Exporter
+    otelcol.exporter.otlp "tempo" {
+      client {
+        endpoint = "192.168.0.175:4317"
+        tls {
+          insecure = true
+        }
+      }
+    }
+
+    // ============================================
+    // 메트릭 수집 (서비스별)
+    // ============================================
+
+    prometheus.scrape "main_backend" {
+      targets = [ {"__address__" = "main-backend:3002", "job" = "main-backend", "service" = "main"} ]
+      forward_to = [prometheus.remote_write.prometheus.receiver]
+      scrape_interval = "15s"
+      metrics_path = "/metrics"
+    }
+
+    prometheus.scrape "quote_backend" {
+      targets = [ {"__address__" = "quote-backend:3003", "job" = "quote-backend", "service" = "quote"} ]
+      forward_to = [prometheus.remote_write.prometheus.receiver]
+      scrape_interval = "15s"
+      metrics_path = "/metrics"
+    }
+
+    prometheus.scrape "community_backend" {
+      targets = [ {"__address__" = "community-backend:3005", "job" = "community-backend", "service" = "community"} ]
+      forward_to = [prometheus.remote_write.prometheus.receiver]
+      scrape_interval = "15s"
+      metrics_path = "/metrics"
+    }
+
+    prometheus.scrape "drive_backend" {
+      targets = [ {"__address__" = "drive-backend:3008", "job" = "drive-backend", "service" = "drive"} ]
+      forward_to = [prometheus.remote_write.prometheus.receiver]
+      scrape_interval = "15s"
+      metrics_path = "/metrics"
+    }
+
+    prometheus.scrape "mypage_backend" {
+      targets = [ {"__address__" = "mypage-backend:3006", "job" = "mypage-backend", "service" = "mypage"} ]
+      forward_to = [prometheus.remote_write.prometheus.receiver]
+      scrape_interval = "15s"
+      metrics_path = "/metrics"
+    }
+
+    prometheus.scrape "aichat_backend" {
+      targets = [ {"__address__" = "aichat-backend:4000", "job" = "aichat-backend", "service" = "aichat"} ]
+      forward_to = [prometheus.remote_write.prometheus.receiver]
+      scrape_interval = "15s"
+      metrics_path = "/metrics"
+    }
+
+    prometheus.scrape "search_backend" {
+      targets = [ {"__address__" = "search-backend:3007", "job" = "search-backend", "service" = "search"} ]
+      forward_to = [prometheus.remote_write.prometheus.receiver]
+      scrape_interval = "15s"
+      metrics_path = "/metrics"
+    }
+
+    // ============================================
+    // 트레이스 수집 - OTLP
+    // ============================================
+
+    otelcol.receiver.otlp "traces" {
+      grpc { endpoint = "0.0.0.0:4317" }
+      http { endpoint = "0.0.0.0:4318" }
+      output {
+        traces = [otelcol.exporter.otlp.tempo.input]
+      }
+    }
+
+
+

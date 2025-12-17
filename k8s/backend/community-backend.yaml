@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: community-backend
+  namespace: alphacar
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: community-backend
+  template:
+    metadata:
+      labels:
+        app: community-backend
+    spec:
+      imagePullSecrets:
+      - name: harbor-registry-secret
+      containers:
+      - name: community-backend
+        image: 192.168.0.169/alphacar-project/alphacar-community:1.0.0
+        ports:
+        - containerPort: 3005
+          name: http
+        env:
+        - name: PORT
+          value: "3005"
+        - name: SERVICE_NAME
+          value: "community-backend"
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-env
+              key: OTEL_EXPORTER_OTLP_ENDPOINT
+        - name: MARIADB_TYPE
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-env
+              key: MARIADB_TYPE
+        - name: MARIADB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-env
+              key: MARIADB_HOST
+        - name: MARIADB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-env
+              key: MARIADB_PORT
+        - name: MARIADB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-secret
+              key: username
+        - name: MARIADB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-secret
+              key: password
+        - name: MARIADB_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-secret
+              key: database
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: community-backend
+  namespace: alphacar
+spec:
+  selector:
+    app: community-backend
+  ports:
+  - port: 3005
+    targetPort: 3005
+    protocol: TCP
+  type: ClusterIP
+
+
+

@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: main-backend
+  namespace: alphacar
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: main-backend
+  template:
+    metadata:
+      labels:
+        app: main-backend
+    spec:
+      imagePullSecrets:
+      - name: harbor-registry-secret
+      containers:
+      - name: main-backend
+        image: 192.168.0.169/alphacar-project/alphacar-main:1.0.0
+        ports:
+        - containerPort: 3002
+          name: http
+        env:
+        - name: PORT
+          value: "3002"
+        - name: SERVICE_NAME
+          value: "main-backend"
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-env
+              key: OTEL_EXPORTER_OTLP_ENDPOINT
+        - name: OTEL_LOG_LEVEL
+          value: "debug"
+        - name: OTEL_DIAG_LEVEL
+          value: "debug"
+        - name: DATABASE_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-env
+              key: MONGO_HOST
+        - name: DATABASE_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-env
+              key: MONGO_PORT
+        - name: DATABASE_USER
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-secret
+              key: username
+        - name: DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-secret
+              key: password
+        - name: DATABASE_NAME
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-secret
+              key: database
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-env
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-env
+              key: REDIS_PORT
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: jwt-secret
+              key: secret
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: main-backend
+  namespace: alphacar
+spec:
+  selector:
+    app: main-backend
+  ports:
+  - port: 3002
+    targetPort: 3002
+    protocol: TCP
+  type: ClusterIP
+
+
+

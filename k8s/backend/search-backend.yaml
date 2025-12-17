@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: search-backend
+  namespace: alphacar
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: search-backend
+  template:
+    metadata:
+      labels:
+        app: search-backend
+    spec:
+      imagePullSecrets:
+      - name: harbor-registry-secret
+      containers:
+      - name: search-backend
+        image: 192.168.0.169/alphacar-project/alphacar-search:1.0.0
+        ports:
+        - containerPort: 3007
+          name: http
+        env:
+        - name: PORT
+          value: "3007"
+        - name: SERVICE_NAME
+          value: "search-backend"
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-env
+              key: OTEL_EXPORTER_OTLP_ENDPOINT
+        - name: DATABASE_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-env
+              key: MONGO_HOST
+        - name: DATABASE_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-env
+              key: MONGO_PORT
+        - name: DATABASE_USER
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-secret
+              key: username
+        - name: DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-secret
+              key: password
+        - name: DATABASE_NAME
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-secret
+              key: database
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: search-backend
+  namespace: alphacar
+spec:
+  selector:
+    app: search-backend
+  ports:
+  - port: 3007
+    targetPort: 3007
+    protocol: TCP
+  type: ClusterIP
+
+
+

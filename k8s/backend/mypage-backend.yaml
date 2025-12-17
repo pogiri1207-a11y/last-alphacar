@@ -1,0 +1,112 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mypage-backend
+  namespace: alphacar
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mypage-backend
+  template:
+    metadata:
+      labels:
+        app: mypage-backend
+    spec:
+      imagePullSecrets:
+      - name: harbor-registry-secret
+      containers:
+      - name: mypage-backend
+        image: 192.168.0.169/alphacar-project/alphacar-mypage:1.0.0
+        ports:
+        - containerPort: 3006
+          name: http
+        env:
+        - name: PORT
+          value: "3006"
+        - name: SERVICE_NAME
+          value: "mypage-backend"
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-env
+              key: OTEL_EXPORTER_OTLP_ENDPOINT
+        - name: DATABASE_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-env
+              key: MONGO_HOST
+        - name: DATABASE_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-env
+              key: MONGO_PORT
+        - name: DATABASE_USER
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-secret
+              key: username
+        - name: DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-secret
+              key: password
+        - name: DATABASE_NAME
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-secret
+              key: database
+        - name: MARIADB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-env
+              key: MARIADB_HOST
+        - name: MARIADB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-env
+              key: MARIADB_PORT
+        - name: MARIADB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-secret
+              key: username
+        - name: MARIADB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-secret
+              key: password
+        - name: MARIADB_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-secret
+              key: database
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: jwt-secret
+              key: secret
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mypage-backend
+  namespace: alphacar
+spec:
+  selector:
+    app: mypage-backend
+  ports:
+  - port: 3006
+    targetPort: 3006
+    protocol: TCP
+  type: ClusterIP
+
+
+

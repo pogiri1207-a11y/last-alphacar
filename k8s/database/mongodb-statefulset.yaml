@@ -1,0 +1,111 @@
+# Headless Service for StatefulSet (Pod 간 직접 통신)
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb-headless
+  namespace: alphacar
+  labels:
+    app: mongodb
+spec:
+  clusterIP: None  # Headless Service
+  ports:
+  - port: 27017
+    targetPort: 27017
+    name: mongodb
+  selector:
+    app: mongodb
+---
+# ClusterIP Service (외부 접근용)
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+  namespace: alphacar
+  labels:
+    app: mongodb
+spec:
+  ports:
+  - port: 27017
+    targetPort: 27017
+    name: mongodb
+  selector:
+    app: mongodb
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongodb
+  namespace: alphacar
+spec:
+  serviceName: mongodb-headless
+  replicas: 3  # Primary + 2 Secondaries
+  selector:
+    matchLabels:
+      app: mongodb
+  template:
+    metadata:
+      labels:
+        app: mongodb
+    spec:
+      # hostPath를 사용하므로 모든 Pod를 마스터 노드에 스케줄링
+      # 마스터 노드의 taint를 허용하기 위해 tolerations 추가
+      nodeSelector:
+        kubernetes.io/hostname: master
+      tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+      containers:
+      - name: mongodb
+        image: mongo:8.0
+        command:
+        - bash
+        - -c
+        - |
+          # MongoDB를 먼저 단일 인스턴스로 시작하여 사용자 생성
+          if [ ! -f /data/db/.mongodb_initialized ]; then
+            echo "MongoDB 초기화 중..."
+            mongod --bind_ip_all --port=27017 --dbpath=/data/db --fork --logpath=/var/log/mongodb/mongod.log
+            sleep 5
+            mongosh --eval "db.getSiblingDB('admin').createUser({user: 'admin', pwd: '123', roles: [{role: 'root', db: 'admin'}]})" || echo "사용자 이미 존재"
+            mongosh admin -u admin -p 123 --eval "db.shutdownServer()"
+            touch /data/db/.mongodb_initialized
+          fi
+          # Replica Set 모드로 시작
+          exec mongod --bind_ip_all --port=27017 --replSet=rs0 --dbpath=/data/db
+        ports:
+        - containerPort: 27017
+          name: mongodb
+        env:
+        - name: MONGO_INITDB_ROOT_USERNAME
+          value: "admin"
+        - name: MONGO_INITDB_ROOT_PASSWORD
+          value: "123"
+        - name: MONGO_INITDB_DATABASE
+          value: "alphacar"
+        volumeMounts:
+        - name: mongodb-data
+          mountPath: /data/db
+        - name: mongodb-config
+          mountPath: /data/configdb
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+      volumes:
+      - name: mongodb-config
+        emptyDir: {}
+  volumeClaimTemplates:
+  - metadata:
+      name: mongodb-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: ""  # hostPath 사용
+      resources:
+        requests:
+          storage: 20Gi
+
