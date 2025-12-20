@@ -1,8 +1,14 @@
 pipeline {
     agent any
 
+    // [핵심] 모든 스테이지에서 도구를 인식할 수 있도록 tools 블록 사용
+    tools {
+        // Global Tool Configuration에 등록한 도구 타입과 이름을 정확히 적습니다.
+        dockerTool 'docker' 
+        hudson.plugins.sonar.SonarRunnerInstallation 'sonar-scanner'
+    }
+
     environment {
-        SONAR_TOOL = 'sonar-scanner'
         SONARQUBE_ID = 'sonarqube'
         SONAR_URL = 'http://sonarqube-service.jenkins.svc.cluster.local:9000'
         HARBOR_URL = '192.168.0.169'
@@ -14,18 +20,11 @@ pipeline {
     }
 
     stages {
-        stage('Setup Tools & Debug') {
+        stage('Setup & Debug') {
             steps {
-                script {
-                    // 1. 도구 경로 확보
-                    def sonarPath = tool name: 'sonar-scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
-                    def dockerPath = tool name: 'docker', type: 'org.jenkinsci.plugins.docker.commons.tools.DockerTool'
-                    env.PATH = "${sonarPath}/bin:${dockerPath}/bin:${env.PATH}"
-                    
-                    // 2. [필독] 도커 소켓 연결 상태 디버깅
-                    echo "🔍 도커 소켓 상태 확인 중..."
-                    sh "ls -la /var/run/docker.sock || echo '❌ 에러: 호스트의 도커 소켓이 젠킨스에 마운트되지 않았습니다!'"
-                }
+                // 도구가 PATH에 잘 들어갔는지 확인합니다.
+                sh 'docker --version'
+                sh 'sonar-scanner --version'
                 checkout scm
                 script {
                     env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
@@ -37,6 +36,7 @@ pipeline {
             steps {
                 dir('dev/alphacar') {
                     withSonarQubeEnv("${SONARQUBE_ID}") {
+                        // tools 블록 덕분에 경로 설정 없이 바로 실행 가능합니다.
                         sh "sonar-scanner -Dsonar.projectKey=alphacar-backend -Dsonar.sources=backend -Dsonar.host.url=${SONAR_URL}"
                     }
                 }
@@ -47,16 +47,14 @@ pipeline {
             steps {
                 dir('dev/alphacar') {
                     script {
-                        // 백엔드 서비스 리스트 (사용자 ls 결과 반영)
                         def backendServices = ['aichat', 'community', 'main', 'mypage', 'news', 'quote', 'search']
 
                         backendServices.each { service ->
-                            echo "🔨 빌드 시작: alphacar-${service}"
-                            // 정확한 하위 폴더 Dockerfile 경로 사용
+                            echo "🔨 서비스 빌드 시작: alphacar-${service}"
+                            // 경로를 수정한 버전입니다.
                             sh "docker build -f backend/${service}/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA} backend/"
                         }
 
-                        // 프론트엔드 및 Nginx 빌드
                         sh "docker build -f frontend/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/${FRONTEND_IMAGE}:${env.GIT_SHA} frontend/"
                         sh "docker build -f nginx.Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/${NGINX_IMAGE}:${env.GIT_SHA} ."
                     }
