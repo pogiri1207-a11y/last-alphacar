@@ -17,7 +17,7 @@ pipeline {
         stage('Setup Tools & Checkout') {
             steps {
                 script {
-                    // 도구 경로 설정 (로그에 찍혔던 정확한 타입 사용)
+                    // 젠킨스 시스템 설정에 등록된 도구 경로 확보
                     def sonarPath = tool name: 'sonar-scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
                     def dockerPath = tool name: 'docker', type: 'org.jenkinsci.plugins.docker.commons.tools.DockerTool'
                     env.PATH = "${sonarPath}/bin:${dockerPath}/bin:${env.PATH}"
@@ -43,17 +43,17 @@ pipeline {
             steps {
                 dir('dev/alphacar') {
                     script {
-                        // [수정] 사용자 ls 결과에 맞춘 서비스 리스트 (news 포함, drive 제외)
+                        // 사용자 ls 결과 반영: news 포함, drive 제외
                         def backendServices = ['aichat', 'community', 'main', 'mypage', 'news', 'quote', 'search']
-                        
+
                         backendServices.each { service ->
-                            echo "🔨 Building service: ${service}"
-                            // [수정] -f 경로를 backend/${service}/Dockerfile 로 변경
-                            // 빌드 컨텍스트(마지막 경로)는 package.json이 있는 backend/ 로 유지
+                            echo "🔨 서비스 빌드 중: ${service}"
+                            // [핵심 수정] -f 경로를 각 서비스 폴더 내부의 Dockerfile로 지정
+                            // 빌드 컨텍스트(마지막 경로)는 공통 라이브러리 참조를 위해 backend/ 폴더 유지
                             sh "docker build -f backend/${service}/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA} backend/"
                         }
-                        
-                        // Frontend 및 Nginx 빌드 (기존 유지)
+
+                        // 프론트엔드 및 Nginx (루트 또는 지정된 경로 유지)
                         sh "docker build -f frontend/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/${FRONTEND_IMAGE}:${env.GIT_SHA} frontend/"
                         sh "docker build -f nginx.Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/${NGINX_IMAGE}:${env.GIT_SHA} ."
                     }
