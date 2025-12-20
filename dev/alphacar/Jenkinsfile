@@ -1,10 +1,15 @@
 pipeline {
     agent any
+    
+    // 젠킨스가 시작할 때 자동으로 도구를 세팅해주는 블록입니다.
+    tools {
+        // Global Tool Configuration에 등록한 'Name'을 적으세요.
+        docker 'docker' 
+        // 소나 스캐너도 이름을 맞춰주세요.
+        'sonar-scanner' 'sonar-scanner'
+    }
+
     environment {
-        // 도구 이름 (젠킨스 설정과 반드시 대소문자까지 일치해야 함)
-        DOCKER_TOOL = 'docker'
-        SONAR_TOOL = 'sonar-scanner'
-        
         SONARQUBE_ID = 'sonarqube'
         SONAR_URL = 'http://sonarqube-service.jenkins.svc.cluster.local:9000'
         HARBOR_URL = '192.168.0.169'
@@ -14,42 +19,34 @@ pipeline {
         DEPLOY_REPO = 'https://github.com/pogiri1207-a11y/last-alphacar.git'
         CREDENTIAL_ID_GITHUB = 'github-cred'
     }
+
     stages {
-        stage('Checkout & Setup Tools') {
+        stage('Checkout & Debug') {
             steps {
                 checkout scm
                 script {
-                    // 1. 도구 경로 가져오기 (가장 단순한 문법 사용)
-                    def dHome = tool "${DOCKER_TOOL}"
-                    def sHome = tool "${SONAR_TOOL}"
-                    
-                    // 2. 환경 변수에 경로 강제 주입
-                    env.DOCKER_HOME = dHome
-                    env.PATH = "${dHome}/bin:${sHome}/bin:${env.PATH}"
-                    
-                    // 3. 디버깅: 실제로 도커가 어디 있는지 출력
-                    sh "echo '도커 설치 경로: ${dHome}'"
-                    sh "docker --version || echo '도커를 찾을 수 없습니다'"
-                    
+                    // 도커가 정상적으로 로드되었는지 확인하는 디버깅 코드
+                    sh 'docker --version'
                     env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
                 }
             }
         }
+
         stage('SonarQube Analysis') {
             steps {
-                script {
-                    dir('dev/alphacar') {
-                        withSonarQubeEnv("${SONARQUBE_ID}") {
-                            sh "sonar-scanner -Dsonar.projectKey=alphacar-backend -Dsonar.sources=backend -Dsonar.host.url=${SONAR_URL}"
-                        }
+                dir('dev/alphacar') {
+                    withSonarQubeEnv("${SONARQUBE_ID}") {
+                        // 도구가 이미 PATH에 들어있으므로 바로 실행 가능합니다.
+                        sh "sonar-scanner -Dsonar.projectKey=alphacar-backend -Dsonar.sources=backend -Dsonar.host.url=${SONAR_URL}"
                     }
                 }
             }
         }
+
         stage('Build Docker Images') {
             steps {
-                script {
-                    dir('dev/alphacar') {
+                dir('dev/alphacar') {
+                    script {
                         def backendServices = ['aichat', 'community', 'drive', 'mypage', 'quote', 'search', 'main']
                         backendServices.each { service ->
                             sh "docker build --build-arg APP_NAME=${service} -f backend/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA} backend/"
@@ -60,6 +57,7 @@ pipeline {
                 }
             }
         }
+
         stage('Push to Harbor') {
             steps {
                 withCredentials([usernamePassword(credentialsId: 'harbor-cred', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
@@ -68,7 +66,7 @@ pipeline {
                         dir('dev/alphacar') {
                             def backendServices = ['aichat', 'community', 'drive', 'mypage', 'quote', 'search', 'main']
                             backendServices.each { service ->
-                                 sh "docker push ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA}"
+                                sh "docker push ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA}"
                             }
                             sh "docker push ${HARBOR_URL}/${HARBOR_PROJECT}/${FRONTEND_IMAGE}:${env.GIT_SHA}"
                             sh "docker push ${HARBOR_URL}/${HARBOR_PROJECT}/${NGINX_IMAGE}:${env.GIT_SHA}"
