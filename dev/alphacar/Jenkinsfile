@@ -2,8 +2,7 @@ pipeline {
     agent any
     environment {
         SONAR_TOOL = 'sonar-scanner'
-        // [중요] Jenkins Tools에서 설정한 'Name'과 정확히 일치해야 함
-        DOCKER_TOOL = 'docker' 
+        DOCKER_TOOL = 'docker' // 젠킨스 도구 관리에서 설정한 이름
         
         SONARQUBE_ID = 'sonarqube'
         SONAR_URL = 'http://sonarqube-service.jenkins.svc.cluster.local:9000'
@@ -36,18 +35,18 @@ pipeline {
         stage('Build Docker Images') {
             steps {
                 script {
-                    // [핵심] 젠킨스가 설정한 도커 도구를 가져와서 경로를 자동으로 잡음
-                    def dockerHome = tool name: "${DOCKER_TOOL}", type: 'docker'
+                    // [핵심] 젠킨스 도구 설치 경로를 가져옵니다.
+                    def dHome = tool name: "${DOCKER_TOOL}", type: 'docker'
+                    def dBin = "${dHome}/bin/docker" // 도커 실행 파일의 실제 위치
                     
-                    withEnv(["PATH+DOCKER=${dockerHome}/bin"]) {
-                        dir('dev/alphacar') {
-                            def backendServices = ['aichat', 'community', 'drive', 'mypage', 'quote', 'search', 'main']
-                            backendServices.each { service ->
-                                sh "docker build --build-arg APP_NAME=${service} -f backend/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA} backend/"
-                            }
-                            sh "docker build -f frontend/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/${FRONTEND_IMAGE}:${env.GIT_SHA} frontend/"
-                            sh "docker build -f nginx.Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/${NGINX_IMAGE}:${env.GIT_SHA} ."
+                    dir('dev/alphacar') {
+                        def backendServices = ['aichat', 'community', 'drive', 'mypage', 'quote', 'search', 'main']
+                        backendServices.each { service ->
+                            // 'docker' 대신 '${dBin}' 전체 경로를 사용합니다.
+                            sh "${dBin} build --build-arg APP_NAME=${service} -f backend/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA} backend/"
                         }
+                        sh "${dBin} build -f frontend/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/${FRONTEND_IMAGE}:${env.GIT_SHA} frontend/"
+                        sh "${dBin} build -f nginx.Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/${NGINX_IMAGE}:${env.GIT_SHA} ."
                     }
                 }
             }
@@ -55,19 +54,20 @@ pipeline {
         stage('Push to Harbor') {
             steps {
                 script {
-                    def dockerHome = tool name: "${DOCKER_TOOL}", type: 'docker'
+                    def dHome = tool name: "${DOCKER_TOOL}", type: 'docker'
+                    def dBin = "${dHome}/bin/docker"
                     
                     withCredentials([usernamePassword(credentialsId: 'harbor-cred', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                        withEnv(["PATH+DOCKER=${dockerHome}/bin"]) {
-                            sh "echo \$PASS | docker login ${HARBOR_URL} -u \$USER --password-stdin"
+                        sh "echo \$PASS | ${dBin} login ${HARBOR_URL} -u \$USER --password-stdin"
+                        dir('dev/alphacar') {
                             def backendServices = ['aichat', 'community', 'drive', 'mypage', 'quote', 'search', 'main']
                             backendServices.each { service ->
-                                 sh "docker push ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA}"
+                                 sh "${dBin} push ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA}"
                             }
-                            sh "docker push ${HARBOR_URL}/${HARBOR_PROJECT}/${FRONTEND_IMAGE}:${env.GIT_SHA}"
-                            sh "docker push ${HARBOR_URL}/${HARBOR_PROJECT}/${NGINX_IMAGE}:${env.GIT_SHA}"
-                            sh "docker logout ${HARBOR_URL}"
+                            sh "${dBin} push ${HARBOR_URL}/${HARBOR_PROJECT}/${FRONTEND_IMAGE}:${env.GIT_SHA}"
+                            sh "${dBin} push ${HARBOR_URL}/${HARBOR_PROJECT}/${NGINX_IMAGE}:${env.GIT_SHA}"
                         }
+                        sh "${dBin} logout ${HARBOR_URL}"
                     }
                 }
             }
