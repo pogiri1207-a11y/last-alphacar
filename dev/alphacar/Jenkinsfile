@@ -1,8 +1,9 @@
 pipeline {
     agent any
     environment {
+        // 도구 이름 (젠킨스 설정과 반드시 대소문자까지 일치해야 함)
+        DOCKER_TOOL = 'docker'
         SONAR_TOOL = 'sonar-scanner'
-        DOCKER_TOOL = 'docker' // 젠킨스 도구 관리에서 설정한 이름
         
         SONARQUBE_ID = 'sonarqube'
         SONAR_URL = 'http://sonarqube-service.jenkins.svc.cluster.local:9000'
@@ -14,19 +15,32 @@ pipeline {
         CREDENTIAL_ID_GITHUB = 'github-cred'
     }
     stages {
-        stage('Checkout Code') {
+        stage('Checkout & Setup Tools') {
             steps {
                 checkout scm
-                script { env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim() }
+                script {
+                    // 1. 도구 경로 가져오기 (가장 단순한 문법 사용)
+                    def dHome = tool "${DOCKER_TOOL}"
+                    def sHome = tool "${SONAR_TOOL}"
+                    
+                    // 2. 환경 변수에 경로 강제 주입
+                    env.DOCKER_HOME = dHome
+                    env.PATH = "${dHome}/bin:${sHome}/bin:${env.PATH}"
+                    
+                    // 3. 디버깅: 실제로 도커가 어디 있는지 출력
+                    sh "echo '도커 설치 경로: ${dHome}'"
+                    sh "docker --version || echo '도커를 찾을 수 없습니다'"
+                    
+                    env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
+                }
             }
         }
         stage('SonarQube Analysis') {
             steps {
                 script {
-                    def sHome = tool "${SONAR_TOOL}"
                     dir('dev/alphacar') {
                         withSonarQubeEnv("${SONARQUBE_ID}") {
-                            sh "${sHome}/bin/sonar-scanner -Dsonar.projectKey=alphacar-backend -Dsonar.sources=backend -Dsonar.host.url=${SONAR_URL}"
+                            sh "sonar-scanner -Dsonar.projectKey=alphacar-backend -Dsonar.sources=backend -Dsonar.host.url=${SONAR_URL}"
                         }
                     }
                 }
@@ -35,39 +49,31 @@ pipeline {
         stage('Build Docker Images') {
             steps {
                 script {
-                    // [핵심] 젠킨스 도구 설치 경로를 가져옵니다.
-                    def dHome = tool name: "${DOCKER_TOOL}", type: 'docker'
-                    def dBin = "${dHome}/bin/docker" // 도커 실행 파일의 실제 위치
-                    
                     dir('dev/alphacar') {
                         def backendServices = ['aichat', 'community', 'drive', 'mypage', 'quote', 'search', 'main']
                         backendServices.each { service ->
-                            // 'docker' 대신 '${dBin}' 전체 경로를 사용합니다.
-                            sh "${dBin} build --build-arg APP_NAME=${service} -f backend/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA} backend/"
+                            sh "docker build --build-arg APP_NAME=${service} -f backend/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA} backend/"
                         }
-                        sh "${dBin} build -f frontend/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/${FRONTEND_IMAGE}:${env.GIT_SHA} frontend/"
-                        sh "${dBin} build -f nginx.Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/${NGINX_IMAGE}:${env.GIT_SHA} ."
+                        sh "docker build -f frontend/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/${FRONTEND_IMAGE}:${env.GIT_SHA} frontend/"
+                        sh "docker build -f nginx.Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/${NGINX_IMAGE}:${env.GIT_SHA} ."
                     }
                 }
             }
         }
         stage('Push to Harbor') {
             steps {
-                script {
-                    def dHome = tool name: "${DOCKER_TOOL}", type: 'docker'
-                    def dBin = "${dHome}/bin/docker"
-                    
-                    withCredentials([usernamePassword(credentialsId: 'harbor-cred', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                        sh "echo \$PASS | ${dBin} login ${HARBOR_URL} -u \$USER --password-stdin"
+                withCredentials([usernamePassword(credentialsId: 'harbor-cred', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                    script {
+                        sh "echo \$PASS | docker login ${HARBOR_URL} -u \$USER --password-stdin"
                         dir('dev/alphacar') {
                             def backendServices = ['aichat', 'community', 'drive', 'mypage', 'quote', 'search', 'main']
                             backendServices.each { service ->
-                                 sh "${dBin} push ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA}"
+                                 sh "docker push ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA}"
                             }
-                            sh "${dBin} push ${HARBOR_URL}/${HARBOR_PROJECT}/${FRONTEND_IMAGE}:${env.GIT_SHA}"
-                            sh "${dBin} push ${HARBOR_URL}/${HARBOR_PROJECT}/${NGINX_IMAGE}:${env.GIT_SHA}"
+                            sh "docker push ${HARBOR_URL}/${HARBOR_PROJECT}/${FRONTEND_IMAGE}:${env.GIT_SHA}"
+                            sh "docker push ${HARBOR_URL}/${HARBOR_PROJECT}/${NGINX_IMAGE}:${env.GIT_SHA}"
                         }
-                        sh "${dBin} logout ${HARBOR_URL}"
+                        sh "docker logout ${HARBOR_URL}"
                     }
                 }
             }
