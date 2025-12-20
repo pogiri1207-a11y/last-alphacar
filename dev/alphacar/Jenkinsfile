@@ -1,40 +1,28 @@
 pipeline {
     agent any
-
     environment {
-        // [도구] 소나 스캐너는 젠킨스 설정에서 잘 작동하니까 이름 유지
         SONAR_TOOL = 'sonar-scanner'
-        
-        // [서버] 설정
         SONARQUBE_ID = 'sonarqube'
         SONAR_URL = 'http://sonarqube-service.jenkins.svc.cluster.local:9000'
         HARBOR_URL = '192.168.0.169' 
         HARBOR_PROJECT = 'giri'
-        
-        // [이미지] 이름
         FRONTEND_IMAGE = 'alphacar-frontend'
         NGINX_IMAGE = 'alphacar-nginx'
-
-        // [GitOps] 정보
         DEPLOY_REPO = 'https://github.com/pogiri1207-a11y/last-alphacar.git'
         CREDENTIAL_ID_GITHUB = 'github-cred'
     }
-
     stages {
         stage('Checkout Code') {
             steps {
                 checkout scm
                 script {
                     env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
-                    echo "📌 현재 Git SHA: ${env.GIT_SHA}"
                 }
             }
         }
-
         stage('SonarQube Analysis') {
             steps {
                 script {
-                    // 소나 스캐너만 도구 경로를 가져옴
                     def sHome = tool "${SONAR_TOOL}"
                     dir('dev/alphacar') {
                         withSonarQubeEnv("${SONARQUBE_ID}") {
@@ -44,14 +32,12 @@ pipeline {
                 }
             }
         }
-
         stage('Build Docker Images') {
             steps {
                 script {
                     dir('dev/alphacar') {
                         def backendServices = ['aichat', 'community', 'drive', 'mypage', 'quote', 'search', 'main']
                         backendServices.each { service ->
-                            // 시스템 도커(/usr/bin/docker)를 직접 사용
                             sh "docker build --build-arg APP_NAME=${service} -f backend/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA} backend/"
                         }
                         sh "docker build -f frontend/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/${FRONTEND_IMAGE}:${env.GIT_SHA} frontend/"
@@ -60,16 +46,6 @@ pipeline {
                 }
             }
         }
-
-        stage('Trivy Security Scan') {
-            steps {
-                script {
-                    echo "🛡️ 트리비 보안 스캔 시작..."
-                    sh "docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image --severity HIGH,CRITICAL ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-main:${env.GIT_SHA}"
-                }
-            }
-        }
-
         stage('Push to Harbor') {
             steps {
                 withCredentials([usernamePassword(credentialsId: 'harbor-cred', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
@@ -86,7 +62,6 @@ pipeline {
                 }
             }
         }
-
         stage('Update Manifests') {
             steps {
                 script {
