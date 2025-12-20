@@ -3,8 +3,8 @@ pipeline {
     
     // 젠킨스가 사용할 도구의 타입을 로그에 찍힌 정확한 명칭으로 수정했습니다.
     tools {
-        dockerTool 'docker' 
-        hudson.plugins.sonar.SonarRunnerInstallation 'sonar-scanner'
+        dockerTool =  'docker' 
+        hudson.plugins.sonar.SonarRunnerInstallation = 'sonar-scanner'
     }
 
     environment {
