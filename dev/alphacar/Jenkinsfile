@@ -1,10 +1,10 @@
 pipeline {
     agent any
     
-    // 젠킨스가 사용할 도구의 타입을 로그에 찍힌 정확한 명칭으로 수정했습니다.
+    // 젠킨스 도구 설정: 등호(=) 없이 타입과 이름을 나열합니다.
     tools {
-        dockerTool =  'docker' 
-        hudson.plugins.sonar.SonarRunnerInstallation = 'sonar-scanner'
+        dockerTool 'docker' 
+        hudson.plugins.sonar.SonarRunnerInstallation 'sonar-scanner'
     }
 
     environment {
@@ -23,7 +23,7 @@ pipeline {
             steps {
                 checkout scm
                 script {
-                    // 도구 경로가 PATH에 잘 들어왔는지 확인
+                    // 도커가 정상적으로 로드되었는지 버전 확인
                     sh 'docker --version'
                     env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
                 }
@@ -34,7 +34,7 @@ pipeline {
             steps {
                 dir('dev/alphacar') {
                     withSonarQubeEnv("${SONARQUBE_ID}") {
-                        // 이제 도구가 자동으로 PATH에 로드되어 바로 실행됩니다.
+                        // 도구 경로가 PATH에 자동 추가되었으므로 명령어만 입력합니다.
                         sh "sonar-scanner -Dsonar.projectKey=alphacar-backend -Dsonar.sources=backend -Dsonar.host.url=${SONAR_URL}"
                     }
                 }
