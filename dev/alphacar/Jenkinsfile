@@ -2,19 +2,21 @@ pipeline {
     agent any
 
     environment {
-        // 도구 이름 설정 (Jenkins Tools에 등록한 이름과 일치해야 함)
-        SONAR_TOOL = 'sonar-scanner'
+        // [도구] Jenkins Tools에 등록한 이름과 일치해야 함
         DOCKER_TOOL = 'docker'
+        SONAR_TOOL = 'sonar-scanner'
         
-        // 서버 및 이미지 정보
-        SONARQUBE = 'sonarqube'
+        // [서버] URL 및 정보 설정
+        SONARQUBE_ID = 'sonarqube'
         SONAR_URL = 'http://sonarqube-service.jenkins.svc.cluster.local:9000'
         HARBOR_URL = '192.168.0.169' 
         HARBOR_PROJECT = 'giri'
+        
+        // [이미지] 고정 이미지 이름
         FRONTEND_IMAGE = 'alphacar-frontend'
         NGINX_IMAGE = 'alphacar-nginx'
 
-        // 배포용 레포지토리 정보
+        // [GitOps] 배포 레포지토리 정보
         DEPLOY_REPO = 'https://github.com/pogiri1207-a11y/last-alphacar.git'
         CREDENTIAL_ID_GITHUB = 'github-cred'
     }
@@ -23,12 +25,15 @@ pipeline {
         stage('Initialize Tools') {
             steps {
                 script {
-                    // Jenkins Tools에서 설정한 도구들의 경로를 환경변수에 저장
-                    def dHome = tool name: "${DOCKER_TOOL}", type: 'docker'
+                    // 도구 이름만으로 경로를 찾아 환경변수에 저장 (에러 방지)
+                    def dHome = tool "${DOCKER_TOOL}"
                     env.DOCKER_BIN = "${dHome}/bin/docker"
                     
-                    def sHome = tool name: "${SONAR_TOOL}", type: 'hudson.plugins.sonar.SonarRunnerInstallation'
+                    def sHome = tool "${SONAR_TOOL}"
                     env.SONAR_SCANNER_BIN = "${sHome}/bin/sonar-scanner"
+                    
+                    echo "✅ Docker Binary: ${env.DOCKER_BIN}"
+                    echo "✅ Sonar Scanner Binary: ${env.SONAR_SCANNER_BIN}"
                 }
             }
         }
@@ -37,6 +42,7 @@ pipeline {
             steps {
                 checkout scm
                 script {
+                    // 현재 커밋의 7자리 SHA 추출
                     env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
                     echo "📌 Current Git SHA: ${env.GIT_SHA}"
                 }
@@ -47,7 +53,7 @@ pipeline {
             steps {
                 script {
                     dir('dev/alphacar') {
-                        withSonarQubeEnv("${SONARQUBE}") {
+                        withSonarQubeEnv("${SONARQUBE_ID}") {
                             sh "${env.SONAR_SCANNER_BIN} -Dsonar.projectKey=alphacar-backend -Dsonar.sources=backend -Dsonar.host.url=${SONAR_URL}"
                         }
                     }
@@ -73,8 +79,8 @@ pipeline {
         stage('Trivy Security Scan') {
             steps {
                 script {
-                    echo "🛡️ Starting Security Scan with Trivy..."
-                    // Trivy도 Docker 도구를 사용하여 실행
+                    echo "🛡️ Starting Security Scan with Trivy (Scanning main service as representative)..."
+                    // Trivy를 1회용 컨테이너로 실행하여 취약점 검사
                     sh "${env.DOCKER_BIN} run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image --severity HIGH,CRITICAL ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-main:${env.GIT_SHA}"
                 }
             }
@@ -85,12 +91,14 @@ pipeline {
                 withCredentials([usernamePassword(credentialsId: 'harbor-cred', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                     script {
                         sh "echo \$PASS | ${env.DOCKER_BIN} login ${HARBOR_URL} -u \$USER --password-stdin"
+                        
                         def backendServices = ['aichat', 'community', 'drive', 'mypage', 'quote', 'search', 'main']
                         backendServices.each { service ->
                              sh "${env.DOCKER_BIN} push ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA}"
                         }
                         sh "${env.DOCKER_BIN} push ${HARBOR_URL}/${HARBOR_PROJECT}/${FRONTEND_IMAGE}:${env.GIT_SHA}"
                         sh "${env.DOCKER_BIN} push ${HARBOR_URL}/${HARBOR_PROJECT}/${NGINX_IMAGE}:${env.GIT_SHA}"
+                        
                         sh "${env.DOCKER_BIN} logout ${HARBOR_URL}"
                     }
                 }
@@ -100,9 +108,11 @@ pipeline {
         stage('Update Manifests (GitOps)') {
             steps {
                 script {
+                    // 별도의 폴더에 배포용 레포지토리 클론
                     dir('deploy-repo') {
                         git credentialsId: "${CREDENTIAL_ID_GITHUB}", url: "${DEPLOY_REPO}"
 
+                        // YAML 파일 내의 이미지 태그를 새로 빌드된 SHA 태그로 교체
                         def backendServices = ['aichat', 'community', 'drive', 'mypage', 'quote', 'search', 'main']
                         backendServices.each { service ->
                             sh "sed -i 's|image: .*/alphacar-${service}:.*|image: ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA}|g' k8s/backend/${service}-backend.yaml"
@@ -110,11 +120,12 @@ pipeline {
 
                         sh "sed -i 's|image: .*/${FRONTEND_IMAGE}:.*|image: ${HARBOR_URL}/${HARBOR_PROJECT}/${FRONTEND_IMAGE}:${env.GIT_SHA}|g' k8s/frontend/frontend-deployment.yaml"
 
+                        // 변경사항을 깃허브에 커밋 및 푸시
                         sh """
                             git config user.email "jenkins@jenkins.com"
                             git config user.name "jenkins"
                             git add .
-                            git commit -m "chore: update image tag to SHA-${env.GIT_SHA} [skip ci]" || echo "no changes"
+                            git commit -m "chore: update image tag to SHA-${env.GIT_SHA} [skip ci]" || echo "No changes to commit"
                             git push origin main
                         """
                     }
