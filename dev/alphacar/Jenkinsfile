@@ -2,9 +2,12 @@ pipeline {
     agent any
     environment {
         SONAR_TOOL = 'sonar-scanner'
+        // [중요] Jenkins Tools에서 설정한 'Name'과 정확히 일치해야 함
+        DOCKER_TOOL = 'docker' 
+        
         SONARQUBE_ID = 'sonarqube'
         SONAR_URL = 'http://sonarqube-service.jenkins.svc.cluster.local:9000'
-        HARBOR_URL = '192.168.0.169' 
+        HARBOR_URL = '192.168.0.169'
         HARBOR_PROJECT = 'giri'
         FRONTEND_IMAGE = 'alphacar-frontend'
         NGINX_IMAGE = 'alphacar-nginx'
@@ -33,8 +36,10 @@ pipeline {
         stage('Build Docker Images') {
             steps {
                 script {
-                    // [핵심] 도커 실행 경로(/usr/bin)를 강제로 환경 변수에 추가
-                    withEnv(['PATH+DOCKER=/usr/bin:/usr/local/bin']) {
+                    // [핵심] 젠킨스가 설정한 도커 도구를 가져와서 경로를 자동으로 잡음
+                    def dockerHome = tool name: "${DOCKER_TOOL}", type: 'docker'
+                    
+                    withEnv(["PATH+DOCKER=${dockerHome}/bin"]) {
                         dir('dev/alphacar') {
                             def backendServices = ['aichat', 'community', 'drive', 'mypage', 'quote', 'search', 'main']
                             backendServices.each { service ->
@@ -49,9 +54,11 @@ pipeline {
         }
         stage('Push to Harbor') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'harbor-cred', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                    script {
-                        withEnv(['PATH+DOCKER=/usr/bin:/usr/local/bin']) {
+                script {
+                    def dockerHome = tool name: "${DOCKER_TOOL}", type: 'docker'
+                    
+                    withCredentials([usernamePassword(credentialsId: 'harbor-cred', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                        withEnv(["PATH+DOCKER=${dockerHome}/bin"]) {
                             sh "echo \$PASS | docker login ${HARBOR_URL} -u \$USER --password-stdin"
                             def backendServices = ['aichat', 'community', 'drive', 'mypage', 'quote', 'search', 'main']
                             backendServices.each { service ->
