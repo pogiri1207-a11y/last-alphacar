@@ -1,25 +1,29 @@
+# 1단계: 빌드 스테이지
 FROM node:20-alpine AS builder
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
+# 1. 패키지 파일 복사
 COPY package*.json ./
 COPY mypage/package*.json ./mypage/
 
-RUN npm ci --legacy-peer-deps && npm install -g @nestjs/cli
+# 2. 의존성 설치 (메모리 최적화 옵션)
+RUN npm ci --legacy-peer-deps --prefer-offline --no-audit &&     npm install -g @nestjs/cli
 
+# 3. 소스 전체 복사
 COPY . .
 
-# 🔹 [핵심] mypage 폴더 내부 의존성 추가 설치 및 빌드
-# axios, jwt 모듈 누락 에러를 해결합니다.
-RUN cd mypage && npm install --legacy-peer-deps && nest build
+# 4. 해당 폴더로 이동하여 빌드
+RUN cd mypage && nest build
 
+# 2단계: 실행 스테이지
 FROM node:20-alpine
 WORKDIR /app
 RUN apk add --no-cache libc6-compat
 
+# 5. 결과물 복사 (경로 최적화)
 COPY --from=builder /app/mypage/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/mypage/node_modules ./mypage/node_modules
 COPY --from=builder /app/mypage/package.json ./package.json
 
 EXPOSE 3000
