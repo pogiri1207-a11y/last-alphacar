@@ -8,7 +8,7 @@ pipeline {
         SERVICES = 'aichat community main mypage news quote search'
 
         // [수정완료] 실제 Argo CD 저장소 주소
-        MANIFEST_REPO_URL = 'https://github.com/pogiri1207-a11y/last_project.git'
+        MANIFEST_REPO_URL = 'https://github.com/pogiri1207-a11y/last-project.git'
         
         GIT_CREDENTIAL_ID = 'github-cred' //
         DOCKER_CREDENTIAL_ID = 'harbor-cred' //
