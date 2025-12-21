@@ -1,6 +1,9 @@
 node_modules
+.next           # 🔹 이 폴더가 빠지면 빌드 컨텍스트 전송이 매우 느려집니다!
+out
+build
 npm-debug.log
 .git
 .gitignore
 Dockerfile
-
+README.md

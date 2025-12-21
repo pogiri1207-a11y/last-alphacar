@@ -1,8 +1,9 @@
-# 1. 공통 베이스: 보안 및 도구 설정
+# 1. 공통 베이스
 FROM node:20-alpine AS base
 WORKDIR /app
 
-# 🔹 npm 최신 업데이트 및 빌드에 필요한 libc6-compat 설치 (Alpine 필수)
+# 🔹 빌드 시간을 줄이기 위해 텔레메트리 비활성화 및 필수 라이브러리 설치
+ENV NEXT_TELEMETRY_DISABLED=1
 RUN apk add --no-cache libc6-compat && \
     npm install -g npm@latest
 
@@ -10,36 +11,39 @@ RUN apk add --no-cache libc6-compat && \
 FROM base AS deps
 WORKDIR /app
 
-# 캐시 효율을 위해 패키지 파일만 먼저 복사
+# 캐시 효율을 위해 패키지 파일만 먼저 복사 (9분 단축의 핵심)
 COPY package.json package-lock.json ./
-# 🔹 의존성 설치 (심볼릭 링크 에러 방지를 위해 --legacy-peer-deps 추가 가능)
-RUN npm ci
+# 🔹 --prefer-offline을 사용하여 네트워크 지연 최소화
+RUN npm ci --prefer-offline --no-audit --progress=false --legacy-peer-deps
 
 # 3. 빌드 스테이지
 FROM base AS builder
 WORKDIR /app
 
-# 이전 스테이지에서 설치된 node_modules 가져오기
+# 이전 스테이지의 node_modules 재사용
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# 🔹 명령어 인식 에러 방지를 위한 PATH 설정
+# 🔹 환경 변수 설정 (에러 방지 및 메모리 제한)
 ENV PATH /app/node_modules/.bin:$PATH
-
-# 🔹 5GB 메모리 보호를 위해 빌드 시 메모리 제한 할당
+ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_OPTIONS="--max-old-space-size=2048"
+
+# 🔹 빌드 실행
 RUN npm run build
 
-# 4. 실행 스테이지 (최종 이미지 경량화)
+# 4. 실행 스테이지 (최종 이미지 - 매우 가벼움)
 FROM base AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
-# 🔹 보안을 위한 전용 유저 생성
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# 보안 유저 생성
 RUN addgroup --system --gid 1001 nodejs \
     && adduser --system --uid 1001 nextjs
 
-# Standalone 빌드 결과물만 복사 (이미지 용량이 획기적으로 줄어듭니다)
+# 🔹 Standalone 결과물만 복사 (Push 시간을 수 분에서 수 초로 단축)
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
@@ -48,5 +52,5 @@ USER nextjs
 EXPOSE 3000
 ENV PORT=3000
 
-# Standalone 모드에서는 node server.js로 실행합니다.
+# 실행
 CMD ["node", "server.js"]

@@ -1,25 +1,20 @@
 pipeline {
     agent any
     environment {
-        SONARQUBE_ID = 'sonar-token'
         HARBOR_URL = '192.168.0.169'
         HARBOR_PROJECT = 'giri'
     }
     stages {
-        stage('Initialize') {
+        stage('Initialize & SonarQube') {
             steps {
                 cleanWs()
+                checkout scm
                 script {
+                    // Git Hash 추출 및 소나 스캐너 설정
+                    env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
                     def sonarPath = tool name: 'sonar-scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
                     env.PATH = "${sonarPath}/bin:${env.PATH}"
-                    checkout scm
-                    env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
                 }
-            }
-        }
-
-        stage('SonarQube Analysis') {
-            steps {
                 dir('dev/alphacar') {
                     withSonarQubeEnv('sonarqube') { 
                         sh "sonar-scanner -Dsonar.projectKey=alphacar-backend -Dsonar.sources=backend -Dsonar.host.url=http://sonarqube-service.jenkins.svc.cluster.local:9000"
@@ -28,10 +23,11 @@ pipeline {
             }
         }
 
-        stage('Build & Trivy Scan (2-Way Parallel)') {
+        stage('Parallel Docker Build (2-Way)') {
             steps {
                 script {
                     def backendServices = ['aichat', 'community', 'main', 'mypage', 'news', 'quote', 'search']
+                    // 메모리 보호를 위해 2개씩 묶어서 처리
                     def chunks = backendServices.collate(2) 
                     
                     chunks.each { chunk ->
@@ -39,17 +35,36 @@ pipeline {
                         chunk.each { service ->
                             builds["Build ${service}"] = {
                                 dir('dev/alphacar') {
-                                    def imageName = "${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA}"
-                                    echo "🔨 빌드 시작: ${service}"
-                                    sh "docker build -f backend/${service}/Dockerfile -t ${imageName} backend/"
-                                    
-                                    echo "🛡️ Trivy 보안 스캔 실행 (Docker 기반)"
-                                    // Trivy를 도커 컨테이너로 실행하여 'not found' 에러를 방지합니다.
-                                    sh "docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy image --severity HIGH,CRITICAL --no-progress ${imageName}"
+                                    echo "🔨 빌드 중: ${service}"
+                                    sh "docker build -f backend/${service}/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA} backend/"
                                 }
                             }
                         }
+                        // 묶인 2개 서비스만 병렬 실행
                         parallel builds
+                    }
+                }
+            }
+        }
+
+        stage('Parallel Trivy Scan (2-Way)') {
+            steps {
+                script {
+                    def backendServices = ['aichat', 'community', 'main', 'mypage', 'news', 'quote', 'search']
+                    // 스캔 시에도 메모리 점유율을 고려해 2개씩 처리
+                    def chunks = backendServices.collate(2) 
+                    
+                    chunks.each { chunk ->
+                        def scans = [:]
+                        chunk.each { service ->
+                            scans["Scan ${service}"] = {
+                                def imageName = "${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA}"
+                                echo "🛡️ 보안 스캔 중: ${service}"
+                                // Docker 기반 Trivy 실행 (Not found 에러 방지)
+                                sh "docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy image --severity HIGH,CRITICAL --no-progress ${imageName}"
+                            }
+                        }
+                        parallel scans
                     }
                 }
             }
@@ -62,6 +77,7 @@ pipeline {
                     script {
                         def backendServices = ['aichat', 'community', 'main', 'mypage', 'news', 'quote', 'search']
                         backendServices.each { name ->
+                            echo "🚀 Harbor 푸시 중: ${name}"
                             sh "docker push ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${name}:${env.GIT_SHA}"
                         }
                     }
