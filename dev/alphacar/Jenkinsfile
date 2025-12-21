@@ -1,7 +1,8 @@
+cat <<EOF > dev/alphacar/Jenkinsfile
 pipeline {
     agent any
     environment {
-        SONARQUBE_ID = 'sonar-token' // Credentials ID 확인
+        SONARQUBE_ID = 'sonar-token'
         HARBOR_URL = '192.168.0.169'
         HARBOR_PROJECT = 'giri'
     }
@@ -11,14 +12,13 @@ pipeline {
                 cleanWs()
                 script {
                     def sonarPath = tool name: 'sonar-scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
-                    env.PATH = "${sonarPath}/bin:${env.PATH}"
+                    env.PATH = "\${sonarPath}/bin:\${env.PATH}"
                     checkout scm
                     env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
                 }
             }
         }
 
-        // [복구] 소나큐브 단계
         stage('SonarQube Analysis') {
             steps {
                 dir('dev/alphacar') {
@@ -29,24 +29,21 @@ pipeline {
             }
         }
 
-        stage('Build & Trivy Scan (Parallel)') {
+        stage('Build & Trivy Scan (2-Way Parallel)') {
             steps {
                 script {
                     def backendServices = ['aichat', 'community', 'main', 'mypage', 'news', 'quote', 'search']
-                    // 메모리 안전을 위해 2개씩 빌드
                     def chunks = backendServices.collate(2) 
                     
                     chunks.each { chunk ->
                         def builds = [:]
                         chunk.each { service ->
-                            builds["Build ${service}"] = {
+                            builds["Build \${service}"] = {
                                 dir('dev/alphacar') {
-                                    def imageName = "${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA}"
-                                    sh "docker build -f backend/${service}/Dockerfile -t ${imageName} backend/"
-                                    
-                                    // [추가] Trivy 보안 스캔 (치명적인 보안 결함 확인)
-                                    echo "🛡️ Scanning image: ${service}"
-                                    sh "trivy image --severity HIGH,CRITICAL --no-progress ${imageName}"
+                                    def imageName = "\${HARBOR_URL}/\${HARBOR_PROJECT}/alphacar-\${service}:\${env.GIT_SHA}"
+                                    sh "docker build -f backend/\${service}/Dockerfile -t \${imageName} backend/"
+                                    echo "🛡️ Scanning image: \${service}"
+                                    sh "trivy image --severity HIGH,CRITICAL --no-progress \${imageName}"
                                 }
                             }
                         }
@@ -59,11 +56,11 @@ pipeline {
         stage('Push to Harbor') {
             steps {
                 withCredentials([usernamePassword(credentialsId: 'harbor-cred', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                    sh "echo \$PASS | docker login ${HARBOR_URL} -u \$USER --password-stdin"
+                    sh "echo \\\$PASS | docker login \${HARBOR_URL} -u \\\$USER --password-stdin"
                     script {
                         def backendServices = ['aichat', 'community', 'main', 'mypage', 'news', 'quote', 'search']
                         backendServices.each { name ->
-                            sh "docker push ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${name}:${env.GIT_SHA}"
+                            sh "docker push \${HARBOR_URL}/\${HARBOR_PROJECT}/alphacar-\${name}:\${env.GIT_SHA}"
                         }
                     }
                 }
@@ -71,3 +68,4 @@ pipeline {
         }
     }
 }
+EOF
