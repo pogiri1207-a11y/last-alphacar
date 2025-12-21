@@ -40,9 +40,12 @@ pipeline {
                             builds["Build ${service}"] = {
                                 dir('dev/alphacar') {
                                     def imageName = "${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA}"
+                                    echo "🔨 빌드 시작: ${service}"
                                     sh "docker build -f backend/${service}/Dockerfile -t ${imageName} backend/"
-                                    echo "🛡️ Scanning image: ${service}"
-                                    sh "trivy image --severity HIGH,CRITICAL --no-progress ${imageName}"
+                                    
+                                    echo "🛡️ Trivy 보안 스캔 실행 (Docker 기반)"
+                                    // Trivy를 도커 컨테이너로 실행하여 'not found' 에러를 방지합니다.
+                                    sh "docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy image --severity HIGH,CRITICAL --no-progress ${imageName}"
                                 }
                             }
                         }
