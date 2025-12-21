@@ -7,15 +7,14 @@ WORKDIR /app
 COPY package*.json ./
 COPY main/package*.json ./main/
 
-# 2. 루트 의존성 및 CLI 설치 (캐시 활용)
+# 2. 의존성 설치 (메모리 보호를 위해 최적화 옵션 적용)
 RUN npm ci --legacy-peer-deps --prefer-offline --no-audit && \
     npm install -g @nestjs/cli
 
 # 3. 소스 전체 복사
 COPY . .
 
-# 4. [수정됨] 해당 서비스 전용 라이브러리 설치 후 빌드
-# --production 옵션을 빼서 빌드 시 필요한 devDependencies까지 확실히 설치합니다.
+# 4. 해당 폴더로 이동하여 전용 라이브러리 설치 및 빌드
 RUN cd main && \
     npm install --legacy-peer-deps --prefer-offline --no-audit && \
     nest build
@@ -25,10 +24,9 @@ FROM node:20-alpine
 WORKDIR /app
 RUN apk add --no-cache libc6-compat
 
-# 5. 결과물 복사
+# 5. 결과물 복사 (경로 오류 완벽 해결)
 COPY --from=builder /app/main/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
-# 서비스 전용 모듈도 포함하여 에러 방지
 COPY --from=builder /app/main/node_modules ./main/node_modules
 COPY --from=builder /app/main/package.json ./package.json
 

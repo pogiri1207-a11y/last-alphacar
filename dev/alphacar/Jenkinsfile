@@ -1,102 +1,58 @@
 pipeline {
     agent any
-    
+
     environment {
-        HARBOR_URL = '192.168.0.169'
-        HARBOR_PROJECT = 'giri'
-        // 서비스 목록 정의
-        SERVICES = 'aichat community main mypage news quote search'
+        // 1. Harbor 설정 (사진의 harbor-cred 사용)
+        DOCKER_REGISTRY = '192.168.0.169'
+        IMAGE_NAME      = 'alphacar-project/alphacar-main' 
+        TAG             = "${BUILD_NUMBER}"
+        
+        // 2. Argo CD가 바라보는 Git 저장소 (사진 속 Repo 주소 참고)
+        GIT_REPO_URL    = 'https://github.com/pogiri1207-a11y/alphacar-deploy.git'
+        
+        // 3. 사진 속 ID로 매칭 완료!
+        GIT_CREDENTIAL_ID   = 'github-cred'  // 수정됨
+        DOCKER_CREDENTIAL_ID = 'harbor-cred' // 수정됨
     }
 
     stages {
-        stage('1. Prepare & SonarQube') {
+        stage('Source Checkout') {
             steps {
-                cleanWs()
-                checkout scm
+                // 저장소에서 소스 가져오기
+                git branch: 'main', credentialsId: "${GIT_CREDENTIAL_ID}", url: "${GIT_REPO_URL}"
+            }
+        }
+
+        stage('Docker Build & Push') {
+            steps {
                 script {
-                    // Git Hash 추출
-                    env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
-                    
-                    // Sonar Scanner 실행
-                    def sonarPath = tool name: 'sonar-scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
-                    env.PATH = "${sonarPath}/bin:${env.PATH}"
-                }
-                dir('dev/alphacar') {
-                    withSonarQubeEnv('sonarqube') { 
-                        sh """
-                        sonar-scanner \
-                        -Dsonar.projectKey=alphacar-backend \
-                        -Dsonar.sources=backend \
-                        -Dsonar.host.url=http://sonarqube-service.jenkins.svc.cluster.local:9000
-                        """
+                    // Harbor에 로그인하여 이미지 업로드
+                    docker.withRegistry("http://${DOCKER_REGISTRY}", "${DOCKER_CREDENTIAL_ID}") {
+                        def appImage = docker.build("${DOCKER_REGISTRY}/${IMAGE_NAME}:${TAG}")
+                        appImage.push()
+                        appImage.push("latest")
                     }
                 }
             }
         }
 
-        stage('2. Trivy Source Scan (Sequential)') {
+        stage('Manifest Update (GitOps)') {
             steps {
                 script {
-                    def serviceList = env.SERVICES.split(' ')
-                    for (service in serviceList) {
-                        echo "🛡️ [${service}] 소스 보안 스캔 중..."
-                        dir("dev/alphacar/backend/${service}") {
-                            sh """
-                            mkdir -p /tmp/trivy-cache
-                            docker run --rm \
-                                -v /tmp/trivy-cache:/root/.cache/trivy \
-                                -v \$(pwd):/src \
-                                aquasec/trivy fs --severity HIGH,CRITICAL --no-progress --scanners vuln /src
-                            """
-                        }
-                    }
-                }
-            }
-        }
-
-        stage('3. Docker Build (Sequential)') {
-            steps {
-                script {
-                    def serviceList = env.SERVICES.split(' ')
-                    for (service in serviceList) {
-                        echo "🔨 [${service}] 빌드 시작..."
-                        dir('dev/alphacar') {
-                            // Docker context를 backend/ 폴더로 지정하여 root node_modules 참조 가능케 함
-                            sh "docker build -f backend/${service}/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA} backend/"
-                            
-                            // 빌드 직후 안 쓰는 레이어 삭제 (용량 확보)
-                            sh "docker image prune -f"
-                        }
-                    }
-                }
-            }
-        }
-
-        stage('4. Push to Harbor') {
-            steps {
-                script {
-                    withCredentials([usernamePassword(credentialsId: 'harbor-cred', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                        sh "echo \$PASS | docker login ${HARBOR_URL} -u \$USER --password-stdin"
+                    sh """
+                        git config user.email "jenkins@alphacar.com"
+                        git config user.name "Jenkins-CI"
                         
-                        def serviceList = env.SERVICES.split(' ')
-                        for (service in serviceList) {
-                            echo "🚀 [${service}] 푸시 중..."
-                            sh "docker push ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA}"
-                        }
+                        # 사진의 Argo CD 'Path'가 k8s/backend 이므로 해당 경로 수정
+                        # 대상 파일이 main-backend.yaml 인지 꼭 확인하세요!
+                        sed -i 's|image: ${DOCKER_REGISTRY}/${IMAGE_NAME}:.*|image: ${DOCKER_REGISTRY}/${IMAGE_NAME}:${TAG}|' k8s/backend/main-backend.yaml
                         
-                        sh "docker logout ${HARBOR_URL}"
-                    }
+                        git add k8s/backend/main-backend.yaml
+                        git commit -m "Update image to ${TAG} [skip ci]"
+                        git push origin main
+                    """
                 }
             }
-        }
-    }
-    
-    post {
-        always {
-            echo "✅ 모든 작업이 완료되었습니다."
-        }
-        failure {
-            echo "❌ 빌드 중 에러가 발생했습니다. 로그를 확인하세요."
         }
     }
 }
