@@ -59,7 +59,6 @@ pipeline {
                         chunk.each { service ->
                             builds["Build ${service}"] = {
                                 dir('dev/alphacar') {
-                                    echo "🔨 빌드 시작: ${service}"
                                     sh "docker build -f backend/${service}/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA} backend/"
                                 }
                             }
@@ -79,6 +78,7 @@ pipeline {
                             sh "docker push ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${name}:${env.GIT_SHA}"
                         }
                     }
+                    sh "docker logout ${HARBOR_URL}"
                 }
             }
         }
