@@ -17,7 +17,7 @@ spec:
       - name: harbor-registry-secret
       containers:
       - name: frontend
-        image: 192.168.0.169/giri/alphacar-frontend:4a240f6
+        image: 192.168.0.169/giri/alphacar-frontend:b0d3dbc
         ports:
         - containerPort: 8000
           name: http
