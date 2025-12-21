@@ -25,12 +25,17 @@ pipeline {
 
         stage('2. Trivy Source Scan') {
             steps {
-                echo "🛡️ 프론트엔드 소스 코드 보안 스캔 중..."
-                sh """
-                    mkdir -p /tmp/trivy-cache
-                    docker run --rm -v /tmp/trivy-cache:/root/.cache/trivy -v \$(pwd):/src \
-                    aquasec/trivy fs --severity HIGH,CRITICAL --no-progress --scanners vuln /src/dev/alphacar/frontend
-                """
+                // 🔹 프론트엔드 폴더로 이동 (경로 에러 해결)
+                dir('dev/alphacar/frontend') {
+                    echo "🛡️ 프론트엔드 소스 코드 보안 스캔 중..."
+                    sh """
+                        mkdir -p /tmp/trivy-cache
+                        docker run --rm \
+                        -v /tmp/trivy-cache:/root/.cache/trivy \
+                        -v \$(pwd):/src \
+                        aquasec/trivy fs --severity HIGH,CRITICAL --no-progress --scanners vuln /src
+                    """
+                }
             }
         }
 
@@ -47,6 +52,7 @@ pipeline {
                 withCredentials([usernamePassword(credentialsId: 'harbor-cred', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                     sh "echo \$PASS | docker login ${HARBOR_URL} -u \$USER --password-stdin"
                     sh "docker push ${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:${env.GIT_SHA}"
+                    sh "docker logout ${HARBOR_URL}"
                 }
             }
         }

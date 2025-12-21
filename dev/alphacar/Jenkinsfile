@@ -31,12 +31,17 @@ pipeline {
                         def scans = [:]
                         chunk.each { service ->
                             scans["Scan ${service}"] = {
-                                echo "🛡️ [${service}] 소스 취약점 스캔 중..."
-                                sh """
-                                    mkdir -p /tmp/trivy-cache
-                                    docker run --rm -v /tmp/trivy-cache:/root/.cache/trivy -v \$(pwd):/src \
-                                    aquasec/trivy fs --severity HIGH,CRITICAL --no-progress --scanners vuln /src/dev/alphacar/backend/${service}
-                                """
+                                // 🔹 해당 폴더로 직접 이동해서 스캔 (경로 에러 해결)
+                                dir("dev/alphacar/backend/${service}") {
+                                    echo "🛡️ [${service}] 소스 취약점 스캔 중..."
+                                    sh """
+                                        mkdir -p /tmp/trivy-cache
+                                        docker run --rm \
+                                        -v /tmp/trivy-cache:/root/.cache/trivy \
+                                        -v \$(pwd):/src \
+                                        aquasec/trivy fs --severity HIGH,CRITICAL --no-progress --scanners vuln /src
+                                    """
+                                }
                             }
                         }
                         parallel scans
@@ -74,6 +79,7 @@ pipeline {
                             sh "docker push ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${name}:${env.GIT_SHA}"
                         }
                     }
+                    sh "docker logout ${HARBOR_URL}"
                 }
             }
         }
