@@ -22,7 +22,7 @@ pipeline {
             }
         }
 
-        stage('2. Trivy Source Scan (Pre-Build)') {
+        stage('2. Trivy Source Scan') {
             steps {
                 script {
                     def services = ['aichat', 'community', 'main', 'mypage', 'news', 'quote', 'search']
@@ -32,7 +32,6 @@ pipeline {
                         chunk.each { service ->
                             scans["Scan ${service}"] = {
                                 dir("dev/alphacar/backend/${service}") {
-                                    echo "🛡️ [${service}] 소스 취약점 스캔 중..."
                                     sh """
                                         mkdir -p /tmp/trivy-cache
                                         docker run --rm \
@@ -49,7 +48,7 @@ pipeline {
             }
         }
 
-        stage('3. Parallel Docker Build (2-Way)') {
+        stage('3. Parallel Docker Build') {
             steps {
                 script {
                     def services = ['aichat', 'community', 'main', 'mypage', 'news', 'quote', 'search']
