@@ -5,7 +5,7 @@ pipeline {
         HARBOR_PROJECT = 'giri'
     }
     stages {
-        stage('1. Initialize & SonarQube') {
+        stage('1. SonarQube Analysis') {
             steps {
                 cleanWs()
                 checkout scm
@@ -31,7 +31,6 @@ pipeline {
                         def scans = [:]
                         chunk.each { service ->
                             scans["Scan ${service}"] = {
-                                // 🔹 해당 폴더로 직접 이동해서 스캔 (경로 에러 해결)
                                 dir("dev/alphacar/backend/${service}") {
                                     echo "🛡️ [${service}] 소스 취약점 스캔 중..."
                                     sh """
@@ -60,6 +59,7 @@ pipeline {
                         chunk.each { service ->
                             builds["Build ${service}"] = {
                                 dir('dev/alphacar') {
+                                    echo "🔨 빌드 시작: ${service}"
                                     sh "docker build -f backend/${service}/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA} backend/"
                                 }
                             }
@@ -79,7 +79,6 @@ pipeline {
                             sh "docker push ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${name}:${env.GIT_SHA}"
                         }
                     }
-                    sh "docker logout ${HARBOR_URL}"
                 }
             }
         }
