@@ -1,29 +1,29 @@
-# 1단계: 빌드 스테이지
 FROM node:20-alpine AS builder
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
-# 1. 패키지 파일 복사 (루트 및 서비스)
+# 1. 루트 및 서비스 패키지 파일 복사
 COPY package*.json ./
 COPY main/package*.json ./main/
 
-# 2. 의존성 설치 및 Nest CLI 전역 설치
+# 2. 의존성 설치 (루트 + Nest CLI)
 RUN npm ci --legacy-peer-deps && npm install -g @nestjs/cli
 
-# 3. 소스 전체 복사 (tsconfig.json, nest-cli.json, libs 폴더 등이 모두 포함됨)
+# 3. 소스 코드 전체 복사
 COPY . .
 
-# 4. 🔹 해당 폴더로 이동하여 빌드 (tsconfig 에러 해결)
-RUN cd main && nest build
+# 4. 🔹 [핵심] main 폴더 내부 의존성 추가 설치 및 빌드
+# ioredis, class-validator 등이 설치되지 않는 문제를 해결합니다.
+RUN cd main && npm install --legacy-peer-deps && nest build
 
-# 2단계: 실행 스테이지
 FROM node:20-alpine
 WORKDIR /app
 RUN apk add --no-cache libc6-compat
 
-# 5. 결과물 복사 (절대 경로 주의)
 COPY --from=builder /app/main/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
+# main 폴더의 node_modules도 혹시 모르니 포함 (의존성 안전장치)
+COPY --from=builder /app/main/node_modules ./main/node_modules
 COPY --from=builder /app/main/package.json ./package.json
 
 EXPOSE 3000
