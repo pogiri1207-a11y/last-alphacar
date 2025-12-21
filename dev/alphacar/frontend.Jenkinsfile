@@ -6,7 +6,7 @@ pipeline {
         IMAGE_NAME = 'alphacar-frontend'
     }
     stages {
-        stage('Initialize & SonarQube') {
+        stage('1. Initialize & SonarQube') {
             steps {
                 cleanWs()
                 checkout scm
@@ -23,36 +23,30 @@ pipeline {
             }
         }
 
-        stage('Docker Build') {
+        stage('2. Trivy Source Scan') {
+            steps {
+                echo "🛡️ 프론트엔드 소스 코드 보안 스캔 중..."
+                sh """
+                    mkdir -p /tmp/trivy-cache
+                    docker run --rm -v /tmp/trivy-cache:/root/.cache/trivy -v \$(pwd):/src \
+                    aquasec/trivy fs --severity HIGH,CRITICAL --no-progress --scanners vuln /src/dev/alphacar/frontend
+                """
+            }
+        }
+
+        stage('3. Docker Build') {
             steps {
                 dir('dev/alphacar') {
-                    script {
-                        def fullImageName = "${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:${env.GIT_SHA}"
-                        echo "🔨 프론트엔드 빌드 시작..."
-                        // BuildKit 에러 방지를 위해 일반 빌드 사용
-                        sh "docker build -f frontend/Dockerfile -t ${fullImageName} frontend/"
-                    }
+                    sh "docker build -f frontend/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:${env.GIT_SHA} frontend/"
                 }
             }
         }
 
-        stage('Trivy Security Scan') {
-            steps {
-                script {
-                    def fullImageName = "${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:${env.GIT_SHA}"
-                    echo "🛡️ 보안 취약점 스캔 시작..."
-                    // 스캔 시간을 줄이기 위해 이미 존재하는 DB 활용 시도 및 도커 실행
-                    sh "docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy image --severity HIGH,CRITICAL --no-progress ${fullImageName}"
-                }
-            }
-        }
-
-        stage('Push to Harbor') {
+        stage('4. Push to Harbor') {
             steps {
                 withCredentials([usernamePassword(credentialsId: 'harbor-cred', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                     sh "echo \$PASS | docker login ${HARBOR_URL} -u \$USER --password-stdin"
                     sh "docker push ${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:${env.GIT_SHA}"
-                    sh "docker logout ${HARBOR_URL}"
                 }
             }
         }
