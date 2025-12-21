@@ -8,7 +8,7 @@ pipeline {
         SERVICES = 'aichat community main mypage news quote search'
 
         // GitOps를 위한 설정
-        MANIFEST_REPO_URL = 'https://github.com/pogiri1207-a11y/alphacar-deploy.git'
+        MANIFEST_REPO_URL = 'https://github.com/pogiri1207-a11y/last_project.git'
         GIT_CREDENTIAL_ID = 'github-cred' // 사진에서 확인된 ID
         DOCKER_CREDENTIAL_ID = 'harbor-cred' // 사진에서 확인된 ID
     }
