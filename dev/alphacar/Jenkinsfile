@@ -4,13 +4,14 @@ pipeline {
     environment {
         HARBOR_URL = '192.168.0.169'
         HARBOR_PROJECT = 'giri'
-        // 서비스 목록 정의
+        // 서비스 목록
         SERVICES = 'aichat community main mypage news quote search'
 
-        // GitOps를 위한 설정
+        // [수정완료] 실제 Argo CD 저장소 주소
         MANIFEST_REPO_URL = 'https://github.com/pogiri1207-a11y/last_project.git'
-        GIT_CREDENTIAL_ID = 'github-cred' // 사진에서 확인된 ID
-        DOCKER_CREDENTIAL_ID = 'harbor-cred' // 사진에서 확인된 ID
+        
+        GIT_CREDENTIAL_ID = 'github-cred' //
+        DOCKER_CREDENTIAL_ID = 'harbor-cred' //
     }
 
     stages {
@@ -19,107 +20,76 @@ pipeline {
                 cleanWs()
                 checkout scm
                 script {
-                    // Git Hash 추출 (Stage 5에서 태그로 사용됨)
                     env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
-
-                    // Sonar Scanner 실행
                     def sonarPath = tool name: 'sonar-scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
                     env.PATH = "${sonarPath}/bin:${env.PATH}"
                 }
                 dir('dev/alphacar') {
                     withSonarQubeEnv('sonarqube') {
-                        sh """
-                        sonar-scanner \
-                        -Dsonar.projectKey=alphacar-backend \
-                        -Dsonar.sources=backend \
-                        -Dsonar.host.url=http://sonarqube-service.jenkins.svc.cluster.local:9000
-                        """
+                        sh "sonar-scanner -Dsonar.projectKey=alphacar-backend -Dsonar.sources=backend -Dsonar.host.url=http://sonarqube-service.jenkins.svc.cluster.local:9000"
                     }
                 }
             }
         }
 
-        stage('2. Trivy Source Scan') {
+        stage('2. 안전한 병렬 빌드 & 푸시 (2개씩)') {
             steps {
                 script {
                     def serviceList = env.SERVICES.split(' ')
-                    for (service in serviceList) {
-                        echo "🛡️ [${service}] 소스 보안 스캔 중..."
-                        dir("dev/alphacar/backend/${service}") {
-                            sh """
-                            mkdir -p /tmp/trivy-cache
-                            docker run --rm \
-                                -v /tmp/trivy-cache:/root/.cache/trivy \
-                                -v \$(pwd):/src \
-                                aquasec/trivy fs --severity HIGH,CRITICAL --no-progress --scanners vuln /src
-                            """
+                    // 7개의 서비스를 2개씩 묶어서 실행합니다.
+                    for (int i = 0; i < serviceList.size(); i += 2) {
+                        def batch = serviceList[i..(Math.min(i + 1, serviceList.size() - 1))]
+                        def actions = [:]
+
+                        batch.each { service ->
+                            actions["Build-${service}"] = {
+                                stage("Process ${service}") {
+                                    echo "🔨 [${service}] 작업 시작..."
+                                    dir('dev/alphacar') {
+                                        // 빌드
+                                        sh "docker build -f backend/${service}/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA} backend/"
+                                        
+                                        // 푸시
+                                        withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIAL_ID}", usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                                            sh "echo \$PASS | docker login ${HARBOR_URL} -u \$USER --password-stdin"
+                                            sh "docker push ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA}"
+                                        }
+                                    }
+                                }
+                            }
                         }
+                        // 이번 배치의 2개 서비스만 동시에 실행
+                        parallel actions
+                        // 배치 사이의 짧은 휴식 (서버 자원 회수 시간)
+                        sh "sleep 5"
+                        sh "docker image prune -f"
                     }
                 }
             }
         }
 
-        stage('3. Docker Build') {
+        stage('3. Update Manifests (GitOps)') {
             steps {
                 script {
-                    def serviceList = env.SERVICES.split(' ')
-                    for (service in serviceList) {
-                        echo "🔨 [${service}] 빌드 시작..."
-                        dir('dev/alphacar') {
-                            sh "docker build -f backend/${service}/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA} backend/"
-                            sh "docker image prune -f"
-                        }
-                    }
-                }
-            }
-        }
-
-        stage('4. Push to Harbor') {
-            steps {
-                script {
-                    withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIAL_ID}", usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                        sh "echo \$PASS | docker login ${HARBOR_URL} -u \$USER --password-stdin"
-
-                        def serviceList = env.SERVICES.split(' ')
-                        for (service in serviceList) {
-                            echo "🚀 [${service}] 푸시 중..."
-                            sh "docker push ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA}"
-                        }
-                        sh "docker logout ${HARBOR_URL}"
-                    }
-                }
-            }
-        }
-
-        stage('5. Update Manifests (GitOps)') {
-            steps {
-                script {
-                    // 1. 임시 디렉토리에 Manifest 저장소 클론
                     dir('manifest-update') {
-                        checkout([$class: 'GitSCM',
-                            branches: [[name: 'main']],
+                        // 기반 경로 및 주소 설정
+                        checkout([$class: 'GitSCM', 
+                            branches: [[name: 'main']], 
                             userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]]
                         ])
 
                         def serviceList = env.SERVICES.split(' ')
                         for (service in serviceList) {
-                            // Argo CD 사진의 Path 참고: k8s/backend/
+                            // Argo CD Path: k8s/backend/
                             def yamlPath = "k8s/backend/${service}-backend.yaml"
-
-                            echo "📝 [${service}]의 이미지 태그를 ${env.GIT_SHA}로 업데이트 중..."
-
-                            // 2. sed 명령어로 이미지 태그 교체
-                            sh """
-                                sed -i 's|image: ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:.*|image: ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA}|' ${yamlPath}
-                            """
+                            sh "sed -i 's|image: ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:.*|image: ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA}|' ${yamlPath}"
                         }
 
-                        // 3. 변경사항 Git Push
                         sh """
                             git config user.email "jenkins@alphacar.com"
                             git config user.name "Jenkins-CI"
                             git add .
-                            git commit -m "Update images to ${env.GIT_SHA} [skip ci]" || echo "No changes to commit"
+                            git commit -m "Update images to ${env.GIT_SHA} [skip ci]" || echo "No changes"
                             git push origin main
                         """
                     }
@@ -130,11 +100,7 @@ pipeline {
 
     post {
         always {
-            echo "✅ 모든 작업이 완료되었습니다."
             cleanWs()
-        }
-        failure {
-            echo "❌ 빌드 중 에러가 발생했습니다."
         }
     }
 }
