@@ -17,8 +17,7 @@ spec:
       - name: harbor-registry-secret
       containers:
       - name: frontend
-        # 충돌 해결: 최신 이미지 태그 적용
-        image: 192.168.0.169/giri/alphacar-frontend:86b04b6
+        image: 192.168.0.169/giri/alphacar-frontend:c235f43
         ports:
         - containerPort: 8000
           name: http
@@ -39,7 +38,6 @@ spec:
           subPath: selfsigned.crt
           readOnly: true
         resources:
-          # 시방서용 리소스 사양 적용
           requests:
             memory: "512Mi"
             cpu: "300m"
